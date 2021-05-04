@@ -60,7 +60,7 @@ def entry(args):
         # parse input csv
         df = pd.read_csv(args.input_csv, sep=',', header=0)
         for index, row in df.iterrows():
-            (name, phone_num, state, dist_or_pin) = row
+            (name, phone_num, email, state, dist_or_pin) = row
             phone_num = str(phone_num).lower()
             state = state.lower()
             dist_or_pin = [x.strip() for x in dist_or_pin.lower().split(';')]

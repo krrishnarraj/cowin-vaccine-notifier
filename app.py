@@ -4,16 +4,17 @@ import argparse
 import asyncio
 import datetime
 import json
-import coloredlogs
 import logging
+import os
 import pickle
 import time
 from collections import defaultdict
 from pathlib import Path
 
+import coloredlogs
 import pandas as pd
 import requests
-
+import yagmail
 
 log = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ def parse_args():
 
 def entry(args):
     try:
-        # values would be list of phone numbers to notify
+        # values would be list of email ids  to notify
         districts_to_check = defaultdict(lambda: [])
         pincodes_to_check = defaultdict(lambda: [])
 
@@ -57,6 +58,24 @@ def entry(args):
         with open(args.metadata_json, "r") as fp:
             metadata = json.load(fp)
 
+        # initialise email
+        yag = None
+        if os.getenv('GMAIL_USER') and os.getenv('GMAIL_PASSWORD'):
+            yag = yagmail.SMTP(os.getenv('GMAIL_USER'),
+                               os.getenv('GMAIL_PASSWORD'))
+        else:
+            log.warning(
+                f"email sending is disabled, pass environment variables GMAIL_USER & GMAIL_PASSWORD to enable it")
+
+        def _notify_user(email, content):
+            try:
+                if yag:
+                    yag.send(email, 'cowin vaccine notifier', content)
+                else:
+                    log.warning(f"couldn't send email to {email}")
+            except Exception as e:
+                log.error(f"couldn't send email to {email}: {e}")
+
         # parse input csv
         df = pd.read_csv(args.input_csv, sep=',', header=0)
         for index, row in df.iterrows():
@@ -69,12 +88,22 @@ def entry(args):
                 # which numbers to notify when this district/pin is ready
                 for item in dist_or_pin:
                     if item.isnumeric():
-                        pincodes_to_check[item].append(phone_num)
+                        pincodes_to_check[item].append(email)
                     else:
                         district_id = metadata[state]['districts'][item]
-                        districts_to_check[district_id].append(phone_num)
+                        districts_to_check[district_id].append(email)
             except:
                 pass
+
+            # send registration email
+            if not notif_history.get(email):
+                notif_history[email] = {}
+            if not notif_history[email].get('_register'):
+                log.info(f'send registration email to {email}')
+                _notify_user(email, [
+                             'You have been registered to receive updates on availablity of cowin vaccine in your interested area.',
+                             'Star and mark this email as important to receive quick notifications'])
+                notif_history[email]['_register'] = True
 
         # generate dates strings
         date_str_lst = [(datetime.datetime.today() + datetime.timedelta(days=x*7)
@@ -90,7 +119,7 @@ def entry(args):
         async def periodic_poll():
             while True:
 
-                def _check(dct, api, key1):
+                async def _check(dct, api, key1):
                     for k, v in dct.items():
                         log.debug(f'check {k}')
                         for date_s in date_str_lst:
@@ -104,27 +133,29 @@ def entry(args):
                                                if _is_available_in_sessions(center['sessions'])]
                                 if len(availabe_at) > 0:
                                     log.debug(f"{availabe_at} notify {v}")
-                                    for phone in v:
+                                    for email in v:
                                         center_lst = []
                                         for center in availabe_at:
                                             now = time.time()
-                                            if notif_history.get(phone) and notif_history[phone].get(center):
+                                            if notif_history.get(email) and notif_history[email].get(center):
                                                 # if last update was more than gap interval
-                                                if (now - notif_history[phone][center]) > (args.notify_gap_interval * 60 * 60):
+                                                if (now - notif_history[email][center]) > (args.notify_gap_interval * 60 * 60):
                                                     center_lst.append(center)
-                                                    notif_history[phone][center] = now
+                                                    notif_history[email][center] = now
                                             else:
                                                 center_lst.append(center)
-                                                if not notif_history.get(phone):
-                                                    notif_history[phone] = {}
-                                                notif_history[phone][center] = now
+                                                if not notif_history.get(email):
+                                                    notif_history[email] = {}
+                                                notif_history[email][center] = now
 
                                         if len(center_lst) > 0:
                                             log.info(
-                                                f'notify {phone} of {center_lst}')
+                                                f'notify {email} of {center_lst}')
+                                            _notify_user(
+                                                email, ['Slots have opened in:', *center_lst])
 
-                _check(pincodes_to_check, 'calendarByPin', 'pincode')
-                _check(districts_to_check, 'calendarByDistrict', 'district_id')
+                await _check(pincodes_to_check, 'calendarByPin', 'pincode')
+                await _check(districts_to_check, 'calendarByDistrict', 'district_id')
 
                 await asyncio.sleep(args.check_interval * 60)
 

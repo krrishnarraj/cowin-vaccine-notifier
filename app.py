@@ -41,6 +41,8 @@ def parse_args():
 
 def entry(args):
     try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/39.0.2171.95 Safari/537.36'}
         # values would be list of email ids  to notify
         districts_to_check = defaultdict(lambda: [])
         pincodes_to_check = defaultdict(lambda: [])
@@ -124,7 +126,7 @@ def entry(args):
                         log.debug(f'check {k}')
                         for date_s in date_str_lst:
                             res = requests.get(
-                                f"https://cdn-api.co-vin.in/api/v2/appointment/sessions/public/{api}?{key1}={k}&date={date_s}")
+                                f"https://cdn-api.co-vin.in/api/v2/appointment/sessions/public/{api}?{key1}={k}&date={date_s}", headers=headers)
 
                             if res.ok:
                                 res_j = json.loads(res.text)
@@ -153,6 +155,8 @@ def entry(args):
                                                 f'notify {email} of {center_lst}')
                                             _notify_user(
                                                 email, ['Slots have opened in:', *center_lst])
+                            else:
+                                log.error(f'request failed {res}')
 
                 await _check(pincodes_to_check, 'calendarByPin', 'pincode')
                 await _check(districts_to_check, 'calendarByDistrict', 'district_id')

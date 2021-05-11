@@ -113,7 +113,7 @@ def entry(args):
 
         def _is_available_in_sessions(sessions):
             for session in sessions:
-                if session['min_age_limit'] <= args.min_age_limit:
+                if session['min_age_limit'] <= args.min_age_limit and session['available_capacity'] > 0:
                     return True
 
             return False
